@@ -82,17 +82,38 @@ ${answerDetail}`;
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!apiKey) throw new Error("VITE_GEMINI_API_KEY 환경변수가 설정되지 않았습니다.");
 
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+  const MAX_RETRIES = 3;
+  const RETRY_DELAYS = [3000, 8000, 15000]; // 3초, 8초, 15초 지수 백오프
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+      }
+    );
+
+    // 429 Rate Limit → 재시도
+    if (res.status === 429 && attempt < MAX_RETRIES) {
+      const delay = RETRY_DELAYS[attempt];
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
     }
-  );
-  if (!res.ok) throw new Error(`API 오류: ${res.status}`);
-  const data = await res.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "분석 결과를 가져올 수 없습니다.";
+
+    if (!res.ok) {
+      if (res.status === 429) {
+        throw new Error("API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요. (429)");
+      }
+      throw new Error(`API 오류: ${res.status}`);
+    }
+
+    const data = await res.json();
+    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "분석 결과를 가져올 수 없습니다.";
+  }
+
+  throw new Error("API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요. (429)");
 }
 
 // ── 리소스 카드 파싱 ──
@@ -243,18 +264,25 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
 
   const [consulting, setConsulting] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState("AI가 분석 중입니다...");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
   const loadConsulting = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setLoadingMsg("AI가 분석 중입니다...");
+    // 5초 후 메시지 변경 (재시도 중일 수 있음을 안내)
+    const msgTimer = setTimeout(() => setLoadingMsg("잠시만 기다려 주세요. API 요청 중..."), 5000);
+    const msgTimer2 = setTimeout(() => setLoadingMsg("응답이 지연되고 있습니다. 조금만 더 기다려 주세요..."), 12000);
     try {
       const text = await fetchConsulting(scores, answers, consistency, profile);
       setConsulting(text);
     } catch (e) {
       setError(e instanceof Error ? e.message : "알 수 없는 오류가 발생했습니다.");
     } finally {
+      clearTimeout(msgTimer);
+      clearTimeout(msgTimer2);
       setLoading(false);
     }
   }, []);
@@ -343,16 +371,26 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
         <div className="loading-wrap">
           <div className="loading-spinner" />
           <div className="loading-text">
-            AI가 당신의 응답을 분석 중입니다...<br />
-            <span style={{ fontSize: "0.8rem", color: "#6E6E73" }}>약 15~30초 소요됩니다</span>
+            {loadingMsg}<br />
+            <span style={{ fontSize: "0.8rem", color: "#6E6E73" }}>약 15~30초 소요됩니다 (Rate Limit 시 자동 재시도)</span>
           </div>
         </div>
       )}
 
       {error && (
         <div className="consulting-box">
-          <div style={{ color: "#FF453A", marginBottom: 12, fontSize: "0.88rem" }}>
-            ⚠️ AI 분석 중 오류가 발생했습니다.<br />{error}
+          <div style={{ color: "#FF453A", marginBottom: 8, fontWeight: 600, fontSize: "0.95rem" }}>
+            ⚠️ AI 분석 중 오류가 발생했습니다.
+          </div>
+          <div style={{ color: "rgba(255,255,255,0.6)", marginBottom: 16, fontSize: "0.83rem", lineHeight: 1.6 }}>
+            {error.includes("429") ? (
+              <>
+                Gemini API 무료 요청 한도를 초과했습니다.<br />
+                <strong style={{ color: "rgba(255,255,255,0.8)" }}>30초~1분 후 아래 버튼을 눌러 다시 시도</strong>해 주세요.
+              </>
+            ) : (
+              error
+            )}
           </div>
           <button className="btn btn-secondary" onClick={loadConsulting} style={{ width: "100%" }}>
             🔄 다시 시도
