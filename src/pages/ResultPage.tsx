@@ -130,28 +130,38 @@ ${answerDetail}`;
   if (!apiKey) throw new Error("VITE_GEMINI_API_KEY 환경변수가 설정되지 않았습니다.");
 
   const MAX_RETRIES = 3;
-  const RETRY_DELAYS = [3000, 8000, 15000]; // 3초, 8초, 15초 지수 백오프
+  // 429(Rate Limit), 503(과부하) 모두 재시도: 5초 → 12초 → 20초
+  const RETRY_DELAYS = [5000, 12000, 20000];
+  const RETRYABLE = new Set([429, 500, 502, 503, 504]);
 
+  let lastStatus = 0;
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 2048, temperature: 0.7 },
+        }),
       }
     );
 
-    // 429 Rate Limit → 재시도
-    if (res.status === 429 && attempt < MAX_RETRIES) {
-      const delay = RETRY_DELAYS[attempt];
-      await new Promise((r) => setTimeout(r, delay));
+    lastStatus = res.status;
+
+    // 재시도 가능한 오류 → 대기 후 재시도
+    if (RETRYABLE.has(res.status) && attempt < MAX_RETRIES) {
+      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
       continue;
     }
 
     if (!res.ok) {
       if (res.status === 429) {
         throw new Error("API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요. (429)");
+      }
+      if (res.status === 503) {
+        throw new Error("Gemini 서버가 일시적으로 혼잡합니다. 30초 후 다시 시도해 주세요. (503)");
       }
       throw new Error(`API 오류: ${res.status}`);
     }
@@ -160,7 +170,9 @@ ${answerDetail}`;
     return data.candidates?.[0]?.content?.parts?.[0]?.text ?? "분석 결과를 가져올 수 없습니다.";
   }
 
-  throw new Error("API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요. (429)");
+  if (lastStatus === 429) throw new Error("API 요청 한도를 초과했습니다. 잠시 후 다시 시도해 주세요. (429)");
+  if (lastStatus === 503) throw new Error("Gemini 서버가 일시적으로 혼잡합니다. 30초 후 다시 시도해 주세요. (503)");
+  throw new Error(`반복 오류로 분석에 실패했습니다. (${lastStatus})`);
 }
 
 // ── 리소스 카드 파싱 ──
@@ -320,8 +332,9 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
     setLoading(true);
     setError(null);
     setLoadingMsg("AI가 분석 중입니다...");
-    const msgTimer = setTimeout(() => setLoadingMsg("잠시만 기다려 주세요. API 요청 중..."), 5000);
-    const msgTimer2 = setTimeout(() => setLoadingMsg("응답이 지연되고 있습니다. 조금만 더 기다려 주세요..."), 12000);
+    const msgTimer = setTimeout(() => setLoadingMsg("AI가 응답을 생성 중입니다... (15~30초 소요)"), 4000);
+    const msgTimer2 = setTimeout(() => setLoadingMsg("서버 혼잡으로 자동 재시도 중입니다. 잠시만 기다려 주세요..."), 10000);
+    const msgTimer3 = setTimeout(() => setLoadingMsg("거의 다 됐습니다. 조금만 더 기다려 주세요..."), 25000);
     try {
       const text = await fetchConsulting(scores, answers, consistency, profile);
       setConsulting(text);
@@ -330,6 +343,7 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
     } finally {
       clearTimeout(msgTimer);
       clearTimeout(msgTimer2);
+      clearTimeout(msgTimer3);
       setLoading(false);
     }
   }, []);
@@ -502,7 +516,7 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
           <div className="loading-spinner" />
           <div className="loading-text">
             {loadingMsg}<br />
-            <span style={{ fontSize: "0.8rem", color: "#6E6E73" }}>약 15~30초 소요됩니다 (Rate Limit 시 자동 재시도)</span>
+            <span style={{ fontSize: "0.8rem", color: "#6E6E73" }}>약 15~45초 소요됩니다 (오류 시 최대 3회 자동 재시도)</span>
           </div>
         </div>
       )}
@@ -517,6 +531,12 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
               <>
                 Gemini API 무료 요청 한도를 초과했습니다.<br />
                 <strong style={{ color: "rgba(255,255,255,0.8)" }}>30초~1분 후 아래 버튼을 눌러 다시 시도</strong>해 주세요.
+              </>
+            ) : error.includes("503") ? (
+              <>
+                Gemini 서버가 일시적으로 혼잡합니다.<br />
+                <strong style={{ color: "rgba(255,255,255,0.8)" }}>30초 후 아래 버튼을 눌러 다시 시도</strong>해 주세요.
+                <br /><span style={{ fontSize: "0.78rem", color: "rgba(255,255,255,0.4)" }}>자동 재시도(3회)가 이미 실행됐습니다.</span>
               </>
             ) : (
               error
