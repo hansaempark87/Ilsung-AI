@@ -33,7 +33,7 @@ export default function IntroPage({ onNext }: Props) {
         {[
           { val: "20", lbl: "실전 시나리오\n문항" },
           { val: "4",  lbl: "핵심 역량\n측정 축" },
-          { val: "3쌍", lbl: "상황별\n일관성 검증" },
+          { val: "3",   lbl: "신뢰도 높은\n측정 기준" },
           { val: "AI", lbl: "맞춤형\n성장 컨설팅" },
         ].map((k) => (
           <div key={k.val} className="kpi-box">

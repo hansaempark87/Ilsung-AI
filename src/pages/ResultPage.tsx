@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useState, useCallback } from "react";
 import BrandBar from "../components/BrandBar";
 import {
   QUESTIONS, CATEGORY_INFO, calcScores, calcConsistency, getGrade, MBTI_HINTS
@@ -267,12 +267,12 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
   const [loadingMsg, setLoadingMsg] = useState("AI가 분석 중입니다...");
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [aiRequested, setAiRequested] = useState(false); // 버튼 클릭 여부
 
   const loadConsulting = useCallback(async () => {
     setLoading(true);
     setError(null);
     setLoadingMsg("AI가 분석 중입니다...");
-    // 5초 후 메시지 변경 (재시도 중일 수 있음을 안내)
     const msgTimer = setTimeout(() => setLoadingMsg("잠시만 기다려 주세요. API 요청 중..."), 5000);
     const msgTimer2 = setTimeout(() => setLoadingMsg("응답이 지연되고 있습니다. 조금만 더 기다려 주세요..."), 12000);
     try {
@@ -287,7 +287,10 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
     }
   }, []);
 
-  useEffect(() => { loadConsulting(); }, []);
+  const handleRequestAI = () => {
+    setAiRequested(true);
+    loadConsulting();
+  };
 
   const handleCopy = () => {
     const url = "https://ilsung-ai.pages.dev";
@@ -366,6 +369,36 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
 
       {/* ── AI 컨설팅 ── */}
       <div className="sec-title" style={{ marginTop: 20 }}>🤖 AI 맞춤 컨설팅</div>
+
+      {/* 버튼 클릭 전: 안내 + 경고 + 버튼 */}
+      {!aiRequested && !consulting && (
+        <div className="consulting-box" style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "2rem", marginBottom: 12 }}>🤖</div>
+          <div style={{ fontWeight: 700, fontSize: "1.05rem", marginBottom: 10, color: "rgba(255,255,255,0.9)" }}>
+            AI가 당신의 응답을 바탕으로<br />맞춤 성장 컨설팅을 제공합니다
+          </div>
+          <div style={{
+            background: "rgba(255,159,10,0.08)",
+            border: "1px solid rgba(255,159,10,0.3)",
+            borderRadius: 10,
+            padding: "14px 16px",
+            marginBottom: 20,
+            textAlign: "left",
+            fontSize: "0.82rem",
+            lineHeight: 1.7,
+            color: "rgba(255,255,255,0.6)",
+          }}>
+            <div style={{ color: "#FF9F0A", fontWeight: 700, marginBottom: 6 }}>⚠️ AI 분석 실행 전 안내</div>
+            이 버튼을 클릭하면 <strong style={{ color: "rgba(255,255,255,0.85)" }}>제작자(박한샘 과장)의 Gemini API</strong>에 연결됩니다.<br />
+            • 요청 횟수에 따라 <strong style={{ color: "rgba(255,255,255,0.85)" }}>API 비용이 청구될 수 있습니다</strong><br />
+            • 무료 플랜 한도가 있어 <strong style={{ color: "rgba(255,255,255,0.85)" }}>사용량 초과 시 분석이 실패</strong>할 수 있습니다<br />
+            • 분석 결과는 AI 생성 콘텐츠이며 참고용입니다
+          </div>
+          <button className="btn btn-primary" onClick={handleRequestAI} style={{ width: "100%" }}>
+            ✨ AI 맞춤 컨설팅 받기
+          </button>
+        </div>
+      )}
 
       {loading && (
         <div className="loading-wrap">
