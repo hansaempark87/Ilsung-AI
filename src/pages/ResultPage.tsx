@@ -262,7 +262,7 @@ export default function ResultPage({ answers, profile, onRetry }: Props) {
   useEffect(() => { loadConsulting(); }, []);
 
   const handleCopy = () => {
-    const url = window.location.href;
+    const url = "https://ilsung-ai.pages.dev";
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(() => {
         setCopied(true);
